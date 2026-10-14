@@ -186,10 +186,10 @@ func (s *Server) codexBackend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method == http.MethodPost && rest == "/responses" {
-		withGatewaySession(w, r)
-		var recorded func()
-		w, recorded = recordConversation(w, r, provider.Responses, body)
-		defer recorded()
+		s.serveAgentWith(w, r, provider.Responses, body, func(w http.ResponseWriter, r *http.Request, _ provider.Protocol, body []byte) {
+			s.codexUpstream(w, r, rest, body)
+		})
+		return
 	}
 	s.codexUpstream(w, r, rest, body)
 }

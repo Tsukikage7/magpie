@@ -163,6 +163,8 @@ The GUI's plugin integration includes `subOf`, `pluginSubs`, and `startPluginSig
 
 ## Verification
 
+Plugins may also declare a provider-independent `magpie.gateway` entry, including pure gateway packages and mixed provider/Pi packages. Its asynchronous request contract and verification are documented in [Gateway request hooks](gateway-request-hooks.md). Existing provider hooks still use their normal entry path.
+
 [`migrate_notice_test.go`](../../internal/provider/migrate_notice_test.go) includes `TestMovedBuiltinsSayTheirPlugin`, which checks that moved built-ins tell contributors which plugin serves them. Migration tests live beside [`migrate.go`](../../internal/provider/migrate.go).
 
 Gateway parity tests in [`plugin_parity_test.go`](../../internal/gateway/plugin_parity_test.go) and other `plugin_*_test.go` files compare or exercise plugin paths. A built-in test alone does not establish moved-user behavior. Inspect each test's fixture to confirm that it covers the provider and operation being changed.

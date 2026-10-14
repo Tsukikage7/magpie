@@ -455,6 +455,9 @@ func notPlugin(target string) error {
 	if err != nil || !st.IsDir() || IsPi(target) {
 		return nil
 	}
+	if Gateway(target) != "" {
+		return nil
+	}
 	if f, _ := Middleware(target); f != "" {
 		return nil
 	}

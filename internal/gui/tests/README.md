@@ -1,5 +1,12 @@
 # Dropdown browser regression
 
+`plugin-gateway.test.cjs` checks gateway-only plugin identification, the existing
+JSON options editor and aggregate diagnostics in all five languages on Chromium
+and WebKit. It uses local API fixtures, saves options through the real page, and
+checks that request hooks have no provider badge. `MAGPIE_GATEWAY_ASSETS` selects
+an older asset directory for a failing regression comparison; user settings and
+live gateways are never accessed.
+
 `settings-proxy-auth.test.cjs` checks optional SOCKS5/SOCKS5h usernames and
 passwords in Settings, using the real page with isolated API fixtures. It
 covers saving and reloading, escaped and non-UTF-8 credentials, masked

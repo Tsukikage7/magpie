@@ -120,7 +120,10 @@ type pluginEntryJSON struct {
 	Named bool `json:"named,omitempty"`
 	// OptionsExample is what its package suggests for its options, which
 	// the options editor starts from when none are set
-	OptionsExample map[string]any `json:"optionsExample,omitempty"`
+	OptionsExample map[string]any       `json:"optionsExample,omitempty"`
+	Gateway        *plugin.GatewayState `json:"gateway,omitempty"`
+	IsGateway      bool                 `json:"isGateway,omitzero"`
+	GatewayOnly    bool                 `json:"gatewayOnly,omitzero"`
 	// IsMiddleware is whether its package has gateway middleware, said of
 	// one switched off too, which Middleware leaves out; MiddlewareOnly is
 	// whether that is all it has, no provider to sign in to
@@ -200,6 +203,7 @@ func pluginsState(ctx context.Context, w Windows) pluginsJSON {
 	// npm's newest, as it said last: asking it again is /api/plugins/npm's
 	known := plugin.InfoCached(npmNames(l.Plugins))
 	mws := middleware.States()
+	gws := plugin.GatewayStates(ctx)
 	var agentErrs map[string]string
 	for _, e := range l.Plugins {
 		if f, _ := plugin.Agent(plugin.Target(e.Spec)); f != "" && !e.Off {
@@ -209,6 +213,17 @@ func pluginsState(ctx context.Context, w Windows) pluginsJSON {
 	}
 	for _, e := range l.Plugins {
 		j := pluginEntryJSON{Entry: e, Error: errs[e.Spec], Providers: names[e.Spec], Version: plugin.Installed(e.Spec), Named: answered}
+		if plugin.Gateway(plugin.Target(e.Spec)) != "" {
+			j.IsGateway = true
+			j.GatewayOnly = plugin.GatewayOnly(plugin.Target(e.Spec))
+			if !e.Off {
+				state := plugin.GatewayState{LastOutcome: "idle"}
+				if found, ok := gws[e.Spec]; ok {
+					state = found
+				}
+				j.Gateway = &state
+			}
+		}
 		if npmPlugin(e.Spec) {
 			j.Latest = known[plugin.Name(e.Spec)].Version
 		}
@@ -227,6 +242,8 @@ func pluginsState(ctx context.Context, w Windows) pluginsJSON {
 		}
 		if file, only := plugin.Middleware(plugin.Target(e.Spec)); file != "" {
 			j.IsMiddleware, j.MiddlewareOnly = true, only
+		}
+		if j.IsMiddleware || j.IsGateway {
 			j.OptionsExample = plugin.OptionsExample(plugin.Target(e.Spec))
 		}
 		if file, _ := plugin.Agent(plugin.Target(e.Spec)); file != "" {

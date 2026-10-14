@@ -83,6 +83,7 @@
     <a href="#ids">Provider ids</a>
     <a href="#test">Testing</a>
     <a href="#publish">Publishing and listing</a>
+    <a href="#gateway-request">Async gateway request hooks</a>
     <a href="#middleware">Gateway middleware</a>
     <a href="#agents">Agent plugins</a>
     <a href="#pi">pi packages</a>
@@ -603,6 +604,13 @@ m plugin logout acme</pre>
           <li>These packages update by themselves in every magpie.</li>
         </ul></li>
     </ul>
+
+    <h2 id="gateway-request"><a class="anchor" href="#gateway-request">Async gateway request hooks</a></h2>
+    <p>A plugin can await I/O before an agent request is routed, for example to recall project context. Declare <code>"magpie": { "gateway": "./gateway.js" }</code> in package.json, or add a <code>*.gateway.js</code> / <code>.mjs</code> / <code>.ts</code> / <code>.mts</code> file (Bun runs TypeScript without a build step). Export a named async <code>onRequest(body, ctx)</code>. A gateway-only package needs no OpenCode main/exports.</p>
+    <p>Optional async <code>onResponse(reply, ctx)</code> receives a best-effort completion notification after output finishes. It cannot change the reply and never holds the live stream. Client tool declarations and tool loops stay with the client.</p>
+<p>It runs in Bun once per agent request, before moejs middleware, for every provider. body is the agent API object. ctx contains <code>protocol</code>, <code>model</code>, <code>stream</code>, <code>path</code>, <code>agent</code>, <code>session</code>, <code>cwd</code>, <code>query</code>, <code>options</code> and <code>signal</code>. The query is the latest user text, excluding tool results and images. Missing identity fields are empty; authorization headers are never included.</p>
+<p>Return an object to replace the request, or undefined to keep it. Each hook receives a clone; mutations from failed or undefined hooks are discarded. Successful changes follow enabled plugin order. Each hook defaults to one second; <code>gatewayTimeoutMs</code> accepts integers from 100 to 10000 milliseconds. The chain sums budgets, clamped to 2–10 seconds; startup plus RPC is bounded to 11 seconds. Settings → Plugins offers JSON options and call, latency, failure and outcome diagnostics. <code>ctx.report(code, bytes)</code> accepts ready/empty/unbound/unauthorized/unavailable/invalid/skipped and byte counts only. Statistics reset on reload and retain no private text. Use <code>ctx.signal</code> with fetch. Errors, invalid returns, timeouts and a host busy starting keep the request. Streamed events stay on moejs. Bun plugins have host privileges; install trusted code.</p>
+<p>Install with <code>magpie plugin add ./my-plugin</code>; save options with <code>magpie plugin options my-plugin '&lbrace;"serverUrl":"http://127.0.0.1:8000"&rbrace;'</code>. On/off and options changes reload the host; source-only edits need a configuration reload. Internal title/classifier requests skip the hook.</p>
 
     <h2 id="middleware"><a class="anchor" href="#middleware">Gateway middleware</a></h2>
     <p>A plugin can also be <em>gateway middleware</em>: code that magpie’s gateway runs on every request an agent sends it, before the request is routed, and on the reply on its way back. It can give a model another name, add to the system prompt, turn a request away, change or hide what the model says, or keep its own count of what goes through. It works with every provider, a plugin’s or not.</p>
