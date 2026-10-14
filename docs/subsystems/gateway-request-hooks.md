@@ -41,7 +41,10 @@ Empty identity fields must not be interpreted as authenticated user identity.
 
 The `gatewayTimeoutMs` option accepts 100–10000 ms (default 1000 ms). The
 entire request hook chain is bounded to ten seconds, with an eleven-second host
-startup/RPC limit. Client cancellation aborts request-hook I/O. Hooks run in
+startup/RPC limit, including waiting for a host already starting during provider
+discovery. The first request waits within that budget rather than skipping its
+hook because startup holds the host lock. Client cancellation aborts the wait
+and request-hook I/O. Hooks run in
 plugin order. Failure keeps the last accepted request; diagnostics contain fixed
 outcome codes and byte counts rather than private content.
 

@@ -755,8 +755,8 @@ func get(ctx context.Context) (*host, error) {
 	return getLocked(ctx)
 }
 
-// getLocked requires hostMu. Gateway hooks use TryLock so a provider
-// starting slowly cannot hold an agent request past its hook budget.
+// getLocked requires hostMu. Gateway hooks bound both the lock wait and
+// startup with their request-hook budget.
 func getLocked(ctx context.Context) (*host, error) {
 	if hostStale.Swap(false) && current != nil {
 		go current.retire()

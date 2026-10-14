@@ -150,7 +150,19 @@ func GatewayBegin(ctx context.Context, body []byte, info GatewayContext) *Gatewa
 	start, cancel := context.WithTimeout(ctx, 11*time.Second)
 	defer cancel()
 	checkList()
-	if !hostMu.TryLock() {
+	// Provider discovery may already be starting the shared host. Wait within
+	// the same hook budget rather than skipping recall on the first request.
+	wait := time.NewTicker(10 * time.Millisecond)
+	defer wait.Stop()
+	for !hostMu.TryLock() {
+		select {
+		case <-start.Done():
+			return nil
+		case <-wait.C:
+		}
+	}
+	if start.Err() != nil {
+		hostMu.Unlock()
 		return nil
 	}
 	h, err := getLocked(start)

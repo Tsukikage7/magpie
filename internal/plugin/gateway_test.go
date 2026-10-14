@@ -27,6 +27,61 @@ func gatewayFixture(t *testing.T, source string) string {
 	return dir
 }
 
+func TestGatewayHookWaitsForStartingHost(t *testing.T) {
+	sandbox(t)
+	gatewayFixture(t, `export function onRequest(body){return {...body,model:"recalled"}}`)
+	// Provider discovery holds this lock while starting the shared host.
+	hostMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			hostMu.Unlock()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	done := make(chan *GatewayRun, 1)
+	go func() { done <- GatewayBegin(ctx, []byte(`{"model":"original"}`), GatewayContext{}) }()
+	select {
+	case run := <-done:
+		if run != nil {
+			run.Close()
+		}
+		t.Fatal("first request skipped the starting host")
+	case <-time.After(50 * time.Millisecond):
+	}
+	hostMu.Unlock()
+	locked = false
+	select {
+	case run := <-done:
+		if run == nil {
+			t.Fatal("first request did not run its recall hook")
+		}
+		defer run.Close()
+		if !strings.Contains(string(run.Body), `"recalled"`) {
+			t.Fatalf("first request was not recalled: %s", run.Body)
+		}
+	case <-ctx.Done():
+		t.Fatal("first request did not resume after host startup")
+	}
+}
+
+func TestGatewayHookHostWaitCancellation(t *testing.T) {
+	sandbox(t)
+	gatewayFixture(t, `export function onRequest(body){return {...body,model:"recalled"}}`)
+	hostMu.Lock()
+	defer hostMu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	body := []byte(`{"model":"original"}`)
+	if got := GatewayRequest(ctx, body, GatewayContext{}); string(got) != string(body) {
+		t.Fatalf("cancelled startup changed the original request: %s", got)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("request skipped host startup instead of waiting for its deadline")
+	}
+}
+
 func TestGatewayRunStateOwnershipAndAsyncResponse(t *testing.T) {
 	sandbox(t)
 	started, release := make(chan struct{}, 2), make(chan struct{}, 2)
