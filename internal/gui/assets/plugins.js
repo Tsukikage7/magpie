@@ -1008,10 +1008,16 @@
     // gateway middleware runs in magpie's gateway, not as a subscription:
     // the row says so, and how it is doing, on a line of its own
     const mw = e.middleware;
+    const gw = e.gateway;
     const ag = e.agent;
     if (mw || e.isMiddleware) nm.append(kindChip("mw"));
+    if (gw || e.isGateway) {
+      const chip = kindChip("mw");
+      chip.querySelector("span").textContent = t("Request hook");
+      nm.append(chip);
+    }
     if (ag || e.isAgent) nm.append(kindChip("ag"));
-    if (e.providers?.length || !(e.middlewareOnly || e.inMagpieOnly || (mw && !e.isMiddleware) || (ag && !e.isAgent))) nm.append(kindChip("pv"));
+    if (e.providers?.length || !(e.gatewayOnly || e.middlewareOnly || e.inMagpieOnly || (mw && !e.isMiddleware) || (ag && !e.isAgent))) nm.append(kindChip("pv"));
     who.append(nm);
     const subs = subsOf(pkg);
     const sub = el("div", "sub");
@@ -1042,7 +1048,7 @@
         else if (!x.signedIn && subs.some((y) => y.signedIn)) s.title = t("{name} is a subscription of its own; {other} works without it", { name: x.name, other: subs.find((y) => y.signedIn).name });
         sub.append(s);
       }
-    } else if ((mw || ag) && !e.providers.length) {
+    } else if ((mw || ag || gw || e.isGateway) && !e.providers.length) {
       // only middleware or an agent: its own line says what it does
     } else if (clashes.length && !e.providers.length) {
       // its own line below says whose it is
@@ -1055,8 +1061,9 @@
     if (sub.textContent) who.append(sub);
     if (!ask) for (const c of clashes) who.append(clashLine(e, c, nameOfSpec));
     if (mw && !e.off && !ask) who.append(mwLine(mw));
+    if (gw && !e.off && !ask) who.append(gatewayLine(gw));
     if (ag && !e.off && !ask) who.append(agentLine(ag));
-    if (mw && !e.off && !ask && editing?.pkg === pkg) who.append(optionsEditor(e));
+    if ((mw || e.isGateway) && !e.off && !ask && editing?.pkg === pkg) who.append(optionsEditor(e));
     // the plugin's own picture (package.json's magpie.icon) before its
     // first provider's, which a plugin of several gives each its own (#1775)
     r.append(logo(l?.icon || l?.npm?.icon || e.icon || subs[0]?.icon || ag?.icon, false, e.middlewareOnly ? "mw" : e.inMagpieOnly && e.isAgent && !e.isMiddleware ? "ag" : ""), who);
@@ -1107,7 +1114,7 @@
       r.append(val);
       return r;
     }
-    if (mw && !e.off && !mw.error && editing?.pkg !== pkg) {
+    if ((e.isGateway || (mw && !mw.error)) && !e.off && editing?.pkg !== pkg) {
       const o = el("button", "text", t("Options"));
       o.title = e.options ? t("The options it runs with") : t("It runs with no options; its package suggests some");
       o.disabled = !!b;
@@ -1238,6 +1245,23 @@
       f.title = t("A failed call leaves the request or reply as it was") + (m.lastError ? "\n" + t("Last: {error}", { error: m.lastError }) : "");
       d.append(el("span", "sep", " · "), f);
     }
+    return d;
+  }
+
+  function gatewayLine(g) {
+    const d = el("div", "sub pm-mw pm-gateway");
+    const labels = {
+      idle: "Waiting for a request", ready: "Context injected", empty: "No matching context",
+      unbound: "Scope not bound", unauthorized: "Authorization failed",
+      unavailable: "Context service unavailable", invalid: "Invalid context response",
+      skipped: "Request skipped", cancelled: "Request cancelled", timeout: "Recall timed out", error: "Request hook failed",
+    };
+    let text = t("Gateway request hook") + ": " + t(labels[g.lastOutcome] || labels.idle);
+    if (g.calls) text += " · " + t("{n} calls, {ms} ms each", { n: g.calls.toLocaleString(intlLang()), ms: g.avgMillis.toFixed(1) });
+    if (g.lastBytes) text += " · " + t("{n} bytes injected", { n: g.lastBytes.toLocaleString(intlLang()) });
+    d.append(el("span", "", text));
+    if (g.failures) d.append(el("span", "sep", " · "), el("span", "pm-mw-fail", t("{n} failed", { n: g.failures.toLocaleString(intlLang()) })));
+    d.title = t("Diagnostics reset when the plugin host restarts; prompts and recalled text are not stored");
     return d;
   }
 

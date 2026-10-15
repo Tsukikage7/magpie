@@ -83,6 +83,7 @@
     <a href="#ids">プロバイダ id</a>
     <a href="#test">テスト</a>
     <a href="#publish">公開と掲載</a>
+    <a href="#gateway-request">非同期ゲートウェイリクエストフック</a>
     <a href="#middleware">ゲートウェイミドルウェア</a>
     <a href="#agents">エージェントプラグイン</a>
     <a href="#pi">pi パッケージ</a>
@@ -603,6 +604,13 @@ m plugin logout acme</pre>
           <li>これらのパッケージは、どの magpie でも自動で更新されます。</li>
         </ul></li>
     </ul>
+
+    <h2 id="gateway-request"><a class="anchor" href="#gateway-request">非同期ゲートウェイリクエストフック</a></h2>
+    <p>プラグインはエージェントのリクエストをルーティングする前に I/O を待てます。package.json に <code>"magpie": { "gateway": "./gateway.js" }</code> を宣言するか、<code>*.gateway.js</code> / <code>.mjs</code> / <code>.ts</code> / <code>.mts</code> を追加し（Bun は TypeScript をビルドなしで実行します）、名前付きの非同期 <code>onRequest(body, ctx)</code> をエクスポートします。専用パッケージに OpenCode main/exports は不要です。</p>
+    <p>任意の非同期 <code>onResponse(reply, ctx)</code> は出力完了後にベストエフォートの通知を受け取ります。応答やライブストリームは変更せず、ツール宣言と実行ループはクライアントが担当します。</p>
+<p>Bun でリクエストごとに一度、moejs の前に実行し、すべてのプロバイダーに適用します。body はエージェント API のオブジェクトです。ctx は <code>protocol</code>、<code>model</code>、<code>stream</code>、<code>path</code>、<code>agent</code>、<code>session</code>、<code>cwd</code>、<code>query</code>、<code>options</code>、<code>signal</code> を持ちます。query は最後のユーザーテキストで、ツール結果と画像を除きます。ない識別情報は空で、Authorization は渡しません。</p>
+<p>オブジェクトを返すと置き換え、undefined は元を保ちます。コピーを渡すので失敗や undefined の直接変更は破棄します。成功した変更は有効な順に渡ります。各フックは既定で 1 秒です。<code>gatewayTimeoutMs</code> は 100〜10000 ミリ秒の整数です。全体は合計予算を 2〜10 秒に制限し、起動と RPC を含めて 11 秒です。設定 → プラグインでオプションと呼び出し回数、時間、失敗、最新の結果を確認できます。<code>ctx.report(code, bytes)</code> は ready/empty/unbound/unauthorized/unavailable/invalid/skipped とバイト数のみを受け付けます。私的なテキストは保存せず、再読み込みで統計をリセットします。fetch に <code>ctx.signal</code> を使ってください。例外、不正な戻り値、タイムアウト、起動中のホストは元を保ちます。ストリームは moejs のままです。Bun はホスト権限で動くので信頼できるコードを使ってください。</p>
+<p><code>magpie plugin add ./my-plugin</code> で追加し、<code>magpie plugin options my-plugin '&lbrace;"serverUrl":"http://127.0.0.1:8000"&rbrace;'</code> で設定します。on/off と設定変更は再読み込みします。ソースだけの変更は設定の再読み込みが必要です。内部のタイトルや分類リクエストは対象外です。</p>
 
     <h2 id="middleware"><a class="anchor" href="#middleware">ゲートウェイミドルウェア</a></h2>
     <p>プラグインは<em>ゲートウェイミドルウェア</em>にもなれます。エージェントが magpie のゲートウェイに送るすべてのリクエストに対して、ルーティングの前に実行され、戻ってくる応答に対しても実行されるコードです。モデルに別名を付ける、システムプロンプトに追記する、リクエストを断る、モデルの出力を書き換えたり隠したりする、通ったものを独自に数える、といったことができます。プラグインのものかどうかに関係なく、すべてのプロバイダで動きます。</p>

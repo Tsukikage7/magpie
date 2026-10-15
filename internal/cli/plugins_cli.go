@@ -18,7 +18,7 @@ import (
 )
 
 const pluginUsage = `usage: magpie plugin [list] [--json]
-       magpie plugin add <npm | git | path>        install an OpenCode provider plugin, a pi package or a gateway middleware (opencode-gemini-auth, pi-antigravity, github:owner/repo, ./my-plugin.js, ./alias.middleware.js)
+       magpie plugin add <npm | git | path>        install an OpenCode provider plugin, a pi package or a gateway hook/middleware (opencode-gemini-auth, pi-antigravity, github:owner/repo, ./my-plugin.js, ./alias.middleware.js, ./recall.gateway.ts)
        magpie plugin rm <name>                     remove one
        magpie plugin update                        install the newest version of each
        magpie plugin on|off <name>                 turn one on or off
@@ -226,6 +226,9 @@ func listPlugins(ctx context.Context, asJSON bool) error {
 			what += " " + muted.Render("("+strings.TrimSpace(n+" "+plugin.Installed(e.Spec))+")")
 		}
 		fmt.Printf("%s  %s\n", what, state)
+		if plugin.Gateway(plugin.Target(e.Spec)) != "" {
+			fmt.Println("  " + muted.Render("async gateway hook") + "  onRequest")
+		}
 		// its calls are counted in the gateway's process, not this one
 		if m, ok := mws[e.Spec]; ok && !e.Off {
 			if m.Error != "" {

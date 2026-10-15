@@ -45,6 +45,9 @@ func Agent(target string) (file string, only bool) {
 // magpie's own process, its gateway middleware and its agent, so the
 // host has nothing of it to load.
 func InMagpieOnly(target string) bool {
+	if Gateway(target) != "" {
+		return false
+	}
 	mw, mwOnly := Middleware(target)
 	ag, agOnly := Agent(target)
 	if mw == "" && ag == "" {
