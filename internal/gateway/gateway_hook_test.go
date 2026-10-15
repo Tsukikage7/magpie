@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yetone/magpie/internal/access"
+	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/plugin"
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/testenv"
@@ -154,7 +156,7 @@ func TestAsyncGatewayThroughProtocols(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "recall.gateway.js")
 	if err := os.WriteFile(abs, []byte(`
 export async function onRequest(body,ctx) {
- const response=await fetch(ctx.options.serverUrl,{method:"POST",headers:{"Authorization":ctx.options.authorization},body:JSON.stringify({session:ctx.session,query:ctx.query}),signal:ctx.signal})
+ const response=await fetch(ctx.options.serverUrl,{method:"POST",headers:{"Authorization":ctx.options.authorization},body:JSON.stringify({session:ctx.session,query:ctx.query,origin:ctx.origin}),signal:ctx.signal})
  if(!response.ok)throw new Error("unavailable")
  const result=await response.json()
  if(typeof result.context!=="string")throw new Error("invalid")
@@ -214,7 +216,7 @@ export async function onRequest(body,ctx) {
 				t.Fatalf("plugin credentials leaked upstream: %s", got)
 			}
 			query := <-queries
-			if query["query"] != "Quartz codename?" || query["session"] != "session-a" {
+			if query["query"] != "Quartz codename?" || query["session"] != "session-a" || query["origin"] != "local" {
 				t.Fatalf("wrong preparation: %+v", query)
 			}
 		})
@@ -263,6 +265,101 @@ func TestGatewayQueryUsesUserWords(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := gatewayQuery(&Request{Messages: tc.messages}); got != tc.want {
 				t.Fatalf("query %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Exercise provenance through authentication and the real Bun lifecycle; a
+// client's body/header claims cannot replace the host's classification.
+func TestAsyncGatewayOrigin(t *testing.T) {
+	t.Setenv("MAGPIE_BUN", testenv.Bun(t))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Cleanup(plugin.Settle)
+	if err := os.MkdirAll(filepath.Dir(catalog.CachePath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(catalog.CachePath(), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := access.Update("add-key", access.Change{Name: "Shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(t.TempDir(), "origin.gateway.mjs")
+	script := `export function onRequest(body,ctx){ctx.state.origin=ctx.origin;body.origin=ctx.origin;return body}
+export async function onResponse(reply,ctx){await fetch(ctx.options.url,{method:"POST",body:JSON.stringify({origin:ctx.origin,before:ctx.state.origin}),signal:ctx.signal})}`
+	observed := make(chan map[string]string, 20)
+	observer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]string
+		json.NewDecoder(r.Body).Decode(&got)
+		observed <- got
+		w.WriteHeader(204)
+	}))
+	defer observer.Close()
+	if err := os.WriteFile(abs, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plugin.Add(t.Context(), abs); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugin.SetOptions(abs, map[string]any{"url": observer.URL}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, peer, header, key, trust, want string }{
+		{"local", "127.0.0.1:1234", "", "", "0", "local"},
+		{"ipv6", "[::1]:1234", "", "", "0", "local"},
+		{"named-loopback", "127.0.0.1:1234", "", key, "0", "gateway-key"},
+		{"remote", "10.0.0.1:1234", "", key, "0", "gateway-key"},
+		{"proxy", "127.0.0.1:1234", "X-Forwarded-For", key, "0", "gateway-key"},
+		{"trusted-proxy", "127.0.0.1:1234", "Forwarded", "", "1", "remote"},
+		{"trusted-tunnel", "127.0.0.1:1234", "Tailscale-User-Login", "", "1", "remote"},
+		{"unknown-peer", "malformed", "", "", "0", "remote"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MAGPIE_TRUST_PROXY", tc.trust)
+			// The guard requires sharing for nonlocal peers, without opening a listener.
+			t.Setenv("MAGPIE_ADDR", "0.0.0.0:3425")
+			req := httptest.NewRequest("POST", "http://127.0.0.1/v1/chat/completions", strings.NewReader(`{"model":"fake/m1","origin":"local","messages":[{"role":"user","content":"hello"}]}`))
+			req.RemoteAddr = tc.peer
+			req.Header.Set("X-Magpie-Origin", "local")
+			if tc.header != "" {
+				req.Header.Set(tc.header, "remote-client")
+			}
+			if tc.key != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.key)
+			}
+			// An invalid peer cannot pass the guard. Check it directly as a defensive
+			// classifier case; all accepted cases go through the complete lifecycle.
+			if tc.name == "unknown-peer" {
+				if got := gatewayOrigin(req); got != tc.want {
+					t.Fatalf("origin=%q, want %q", got, tc.want)
+				}
+				return
+			}
+			w := httptest.NewRecorder()
+			lanGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				New().serveAgentWith(w, r, provider.Chat, []byte(`{"model":"fake/m1","origin":"local","messages":[{"role":"user","content":"hello"}]}`), func(w http.ResponseWriter, r *http.Request, p provider.Protocol, b []byte) {
+					var got map[string]any
+					json.Unmarshal(b, &got)
+					if got["origin"] != tc.want {
+						t.Errorf("request origin=%v, want %s", got["origin"], tc.want)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+				})
+			})).ServeHTTP(w, req)
+			if w.Code != 200 {
+				t.Fatalf("guard status=%d: %s", w.Code, w.Body.String())
+			}
+			select {
+			case got := <-observed:
+				if got["origin"] != tc.want || got["before"] != tc.want {
+					t.Fatalf("callback provenance=%v, want %s", got, tc.want)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("missing completion origin")
 			}
 		})
 	}

@@ -11,7 +11,7 @@ sequenceDiagram
     participant Hook as Bun gateway hook
     participant Model
     Client->>Magpie: Request
-    Magpie->>Hook: await onRequest(body, ctx)
+    Magpie->>Hook: await onRequest(body, ctx with host-derived origin)
     Hook-->>Magpie: Context-enriched body, or original on failure
     Magpie->>Model: One inference request
     Model-->>Client: Live response through Magpie
@@ -33,11 +33,20 @@ or changes client tool declarations or tool choice. It cannot reject requests or
 register tools. The synchronous middleware API remains available separately.
 
 Context fields: `protocol` (`chat`, `responses`, `anthropic`, `gemini`), `model`,
-`stream`, `path`, `agent`, `session`, `cwd`, `query`, package `options`, private
+`stream`, `path`, `origin`, `agent`, `session`, `cwd`, `query`, package `options`, private
 request `state`, an `AbortSignal` and `report(code, bytes)`. Headers and client
 credentials are not forwarded to the hook. Query extraction keeps original model
 input intact while excluding client environment/instruction notices from recall.
 Empty identity fields must not be interpreted as authenticated user identity.
+
+`origin` is host-derived: `local` for a direct loopback request without
+forwarding headers or a named gateway key, `gateway-key` for a named key
+(including one used on loopback), otherwise `remote`. Forwarded traffic stays
+remote even with `MAGPIE_TRUST_PROXY=1`. No key, key name, peer address or
+client-supplied origin claim is exposed. Missing origin on an older host means
+unknown. This classification is not a user identity; plugins that export
+conversations must obtain their own explicit opt-in and default to skipping
+non-local or unknown origins. It is available in both lifecycle callbacks.
 
 The `gatewayTimeoutMs` option accepts 100–10000 ms (default 1000 ms). The
 entire request hook chain is bounded to ten seconds, with an eleven-second host

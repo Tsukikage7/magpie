@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"net/http"
+	"slices"
 
+	"github.com/yetone/magpie/internal/access"
 	"github.com/yetone/magpie/internal/middleware"
 	"github.com/yetone/magpie/internal/plugin"
 	"github.com/yetone/magpie/internal/provider"
@@ -28,7 +30,7 @@ func (s *Server) serveAgentWith(w http.ResponseWriter, r *http.Request, from pro
 	var hooks *plugin.GatewayRun
 	var info plugin.GatewayContext
 	if plugin.HasGateway() {
-		info = plugin.GatewayContext{Protocol: string(from), Model: modelOf(body), Stream: streamOf(body), Path: r.URL.Path, Agent: agentOf(r), Session: sessionOf(r.Header)}
+		info = plugin.GatewayContext{Origin: gatewayOrigin(r), Protocol: string(from), Model: modelOf(body), Stream: streamOf(body), Path: r.URL.Path, Agent: agentOf(r), Session: sessionOf(r.Header)}
 		if req, err := parse(from, body); err == nil {
 			info.Cwd = workDir(req)
 			info.Query = gatewayQuery(req)
@@ -73,4 +75,17 @@ func gatewayQuery(req *Request) string {
 		}
 	}
 	return ""
+}
+
+// gatewayOrigin exposes provenance, never credentials or peer addresses.
+// Forwarded traffic remains remote even when the administrator trusts its
+// proxy for authentication: that trust does not establish conversation ownership.
+func gatewayOrigin(r *http.Request) string {
+	if access.Caller(r.Context()).KeyID != "" || managedKey(r) {
+		return "gateway-key"
+	}
+	if local(r) && !slices.ContainsFunc(forwardHeaders, func(h string) bool { return r.Header.Get(h) != "" }) {
+		return "local"
+	}
+	return "remote"
 }
